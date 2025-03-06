@@ -6,67 +6,57 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 // import mongoose from "mongoose"
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const zod_1 = require("zod");
+// import {z} from "zod";
 const db_1 = require("./db");
+// import { Request,Response } from "express";
 const db_2 = require("./db");
-const bcrypt_1 = __importDefault(require("bcrypt"));
+// import bcrypt from "bcrypt"
+const utils_1 = require("./utils");
 const middleware_1 = require("./middleware");
+const cors_1 = __importDefault(require("cors"));
+const JWT_PASSWORD = "12345";
 // import mongoose from "mongoose";
 const app = (0, express_1.default)();
 app.use(express_1.default.json());
-const JWT_USER_PASS = "12345";
+app.use((0, cors_1.default)());
 app.post("/api/v1/signup", async (req, res) => {
-    const requireBody = zod_1.z.object({
-        username: zod_1.z.string().min(4).max(8),
-        password: zod_1.z.string().min(8),
-    });
-    const parseData = requireBody.safeParse(req.body);
-    if (!parseData.success) {
-        res.status(400).json({
-            msg: "Invalid Credentials"
-        });
-    }
+    // TODO: zod validation , hash the password
     const username = req.body.username;
     const password = req.body.password;
-    const hashedPass = await bcrypt_1.default.hash(password, 5);
     try {
         await db_1.User.create({
             username: username,
-            password: hashedPass
+            password: password
         });
-        res.status(200).json({
-            msg: "Signup Successfull"
+        res.json({
+            message: "User signed up"
         });
     }
     catch (e) {
-        res.status(411).json({ msg: "Invalid Credentials" });
+        res.status(411).json({
+            message: "User already exists"
+        });
     }
 });
 app.post("/api/v1/signin", async (req, res) => {
-    try {
-        const { username, password } = req.body;
-        if (!username || !password) {
-            res.status(400).json({ error: "Username and password are required" });
-            return;
-        }
-        const user = await db_1.User.findOne({ username }).select("+password");
-        if (!user) {
-            res.status(400).json({ error: "User not found" });
-        }
-        if (!user?.password) {
-            res.status(500).json({ error: "Password field is missing in the database" });
-            return;
-        }
-        const passwordMatch = await bcrypt_1.default.compare(password, user.password);
-        if (!passwordMatch) {
-            res.status(403).json({ msg: "Invalid Credentials" });
-        }
-        const token = jsonwebtoken_1.default.sign({ id: user._id }, JWT_USER_PASS, { expiresIn: "24h" });
-        res.status(200).json({ token });
+    const username = req.body.username;
+    const password = req.body.password;
+    const existingUser = await db_1.User.findOne({
+        username,
+        password
+    });
+    if (existingUser) {
+        const token = jsonwebtoken_1.default.sign({
+            id: existingUser._id
+        }, JWT_PASSWORD);
+        res.json({
+            token
+        });
     }
-    catch (error) {
-        console.error("Signin error:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+    else {
+        res.status(403).json({
+            message: "Incorrrect credentials"
+        });
     }
 });
 app.post("/api/v1/content", middleware_1.userMiddleware, async (req, res) => {
@@ -76,7 +66,6 @@ app.post("/api/v1/content", middleware_1.userMiddleware, async (req, res) => {
         link,
         type,
         title: req.body.title,
-        // @ts-ignore
         userId: req.userId,
         tags: []
     });
@@ -85,30 +74,83 @@ app.post("/api/v1/content", middleware_1.userMiddleware, async (req, res) => {
     });
 });
 app.get("/api/v1/content", middleware_1.userMiddleware, async (req, res) => {
-    //  @ts-ignore
+    // @ts-ignore
     const userId = req.userId;
     const content = await db_2.Content.find({
         userId: userId
     }).populate("userId", "username");
     res.json({
-        content: content
+        content
     });
 });
 app.delete("/api/v1/content", middleware_1.userMiddleware, async (req, res) => {
     const contentId = req.body.contentId;
     await db_2.Content.deleteMany({
-        contentId: contentId,
-        //  @ts-ignore
+        contentId,
         userId: req.userId
     });
     res.json({
-        msg: "Deleted"
+        message: "Deleted"
     });
 });
-// app.post("/api/v1/brain/share",(req,res)=>{
-// })
-// app.get("/api/v1/brain/:shareLink",(req,res)=>{
-// })
-app.listen(3000, () => {
-    console.log("Server is Runinng");
+app.post("/api/v1/brain/share", middleware_1.userMiddleware, async (req, res) => {
+    const share = req.body.share;
+    if (share) {
+        const existingLink = await db_1.Link.findOne({
+            userId: req.userId
+        });
+        if (existingLink) {
+            res.json({
+                hash: existingLink.hash
+            });
+            return;
+        }
+        const hash = (0, utils_1.random)(10);
+        await db_1.Link.create({
+            userId: req.userId,
+            hash: hash
+        });
+        res.json({
+            hash
+        });
+    }
+    else {
+        await db_1.Link.deleteOne({
+            userId: req.userId
+        });
+        res.json({
+            message: "Removed link"
+        });
+    }
 });
+app.get("/api/v1/brain/:shareLink", async (req, res) => {
+    const hash = req.params.shareLink;
+    const link = await db_1.Link.findOne({
+        hash
+    });
+    if (!link) {
+        res.status(411).json({
+            message: "Sorry incorrect input"
+        });
+        return;
+    }
+    // userId
+    const content = await db_2.Content.find({
+        userId: link.userId
+    });
+    console.log(link);
+    const user = await db_1.User.findOne({
+        _id: link.userId
+    });
+    if (!user) {
+        res.status(411).json({
+            message: "user not found, error should ideally not happen"
+        });
+        return;
+    }
+    res.json({
+        username: user.username,
+        content: content
+    });
+});
+app.listen(3000);

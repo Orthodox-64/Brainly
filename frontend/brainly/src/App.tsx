@@ -2,18 +2,21 @@
 // import reactLogo from './assets/react.svg'
 // import viteLogo from '/vite.svg'
 import './App.css'
-import { Button } from './components/ui/Button'
-import { PlusIcon } from './icons/PlusIcon'
+import { BrowserRouter, Routes, Route } from "react-router-dom"
+import { Signin } from './Pages/Signin'
+import { Signup } from './Pages/Signup'
+import { Dashboard } from './Pages/Dasboard'
+
 
 function App() {
 
-  return (
-    <>
-      <Button startIcon={<PlusIcon size='md'/>} size="sm" variant='primary' text='Share'></Button>
-      <Button size="md" variant='secondary' text='Add Content'></Button>
-      <Button size="lg" variant='secondary' text='Add Content'></Button>
-    </>
-  )
+  return <BrowserRouter>
+    <Routes>
+      <Route path="/signup" element={<Signup />} />
+      <Route path="/signin" element={<Signin />} />
+      <Route path="/dashboard" element={<Dashboard />} />
+    </Routes>
+  </BrowserRouter>
 }
 
 export default App

@@ -1,128 +1,174 @@
 import express from "express";
 // import mongoose from "mongoose"
 import jwt from "jsonwebtoken"
-import {z} from "zod";
-import { User } from "./db";
-import { Request,Response } from "express";
+// import {z} from "zod";
+import { Link, User } from "./db";
+// import { Request,Response } from "express";
 import {Content} from "./db";
-import bcrypt from "bcrypt"
+// import bcrypt from "bcrypt"
+import {random} from "./utils"
 import { userMiddleware } from "./middleware";
+import cors from "cors"
+const JWT_PASSWORD="12345"
 // import mongoose from "mongoose";
 
-const app=express();
+const app = express();
 app.use(express.json());
-const JWT_USER_PASS="12345"
+app.use(cors());
 
-app.post("/api/v1/signup",async(req,res)=>{
-     const requireBody=z.object({
-       username:z.string().min(4).max(8),
-       password:z.string().min(8),
-     })
-     const parseData=requireBody.safeParse(req.body);
-     if(!parseData.success){
-      res.status(400).json({
-        msg:"Invalid Credentials"
-      })
-     }
-     const username=req.body.username;
-     const password=req.body.password;
-     const hashedPass=await bcrypt.hash(password,5);
-     try{
-     await User.create({
-       username:username,
-       password:hashedPass
-     })
-     res.status(200).json({
-      msg:"Signup Successfull"
+app.post("/api/v1/signup", async (req, res) => {
+    // TODO: zod validation , hash the password
+    const username = req.body.username;
+    const password = req.body.password;
+
+    try {
+        await User.create({
+            username: username,
+            password: password
+        }) 
+
+        res.json({
+            message: "User signed up"
+        })
+    } catch(e) {
+        res.status(411).json({
+            message: "User already exists"
+        })
+    }
+})
+
+app.post("/api/v1/signin", async (req, res) => {
+    const username = req.body.username;
+    const password = req.body.password;
+
+    const existingUser = await User.findOne({
+        username,
+        password
     })
+    if (existingUser) {
+        const token = jwt.sign({
+            id: existingUser._id
+        }, JWT_PASSWORD)
+
+        res.json({
+            token
+        })
+    } else {
+        res.status(403).json({
+            message: "Incorrrect credentials"
+        })
     }
-     catch(e){
-      res.status(411).json({msg:"Invalid Credentials"});
-     }
 })
 
-app.post("/api/v1/signin", async (req: Request, res: Response) => {
-  try {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-       res.status(400).json({ error: "Username and password are required" });
-       return;
-    }
-
-    const user = await User.findOne({ username }).select("+password");
-    if (!user) {
-       res.status(400).json({ error: "User not found" });
-    }
-
-    if (!user?.password) {
-       res.status(500).json({ error: "Password field is missing in the database" });
-       return
-    }
-
-    const passwordMatch = await bcrypt.compare(password, user.password);
-    if (!passwordMatch) {
-       res.status(403).json({ msg: "Invalid Credentials" });
-    }
-
-    const token = jwt.sign({ id: user._id }, JWT_USER_PASS, { expiresIn: "24h" });
-
-     res.status(200).json({ token }); 
-  } catch (error) {
-    console.error("Signin error:", error);
-     res.status(500).json({ error: "Internal Server Error" }); 
-  }
-});
-
-app.post("/api/v1/content",userMiddleware,async(req,res)=>{
-  const link = req.body.link;
-  const type = req.body.type;
-  await Content.create({
-      link,
-      type,
-      title: req.body.title,
-      // @ts-ignore
-      userId: req.userId,
-      tags: []
-  })
-
-  res.json({
-      message: "Content added"
-  })
-})
-
-app.get("/api/v1/content",userMiddleware,async(req,res)=>{
-  //  @ts-ignore
-   const userId=req.userId;
-   const content=await Content.find({
-     userId:userId
-   }).populate("userId","username");
-   res.json({
-    content:content
-   })
-})
-
-app.delete("/api/v1/content",userMiddleware,async(req,res)=>{
-    const contentId=req.body.contentId;
-    await Content.deleteMany({
-       contentId,
-      //  @ts-ignore
-       userId:req.userId
+app.post("/api/v1/content", userMiddleware, async (req, res) => {
+    const link = req.body.link;
+    const type = req.body.type;
+    await Content.create({
+        link,
+        type,
+        title: req.body.title,
+        userId: req.userId,
+        tags: []
     })
+
     res.json({
-      msg:"Deleted"
+        message: "Content added"
+    })
+    
+})
+
+app.get("/api/v1/content", userMiddleware, async (req, res) => {
+    // @ts-ignore
+    const userId = req.userId;
+    const content = await Content.find({
+        userId: userId
+    }).populate("userId", "username")
+    res.json({
+        content
     })
 })
 
-// app.post("/api/v1/brain/share",(req,res)=>{
+app.delete("/api/v1/content", userMiddleware, async (req, res) => {
+    const contentId = req.body.contentId;
 
-// })
+    await Content.deleteMany({
+        contentId,
+        userId: req.userId
+    })
 
-// app.get("/api/v1/brain/:shareLink",(req,res)=>{
+    res.json({
+        message: "Deleted"
+    })
+})
 
-// })
+app.post("/api/v1/brain/share", userMiddleware, async (req, res) => {
+    const share = req.body.share;
+    if (share) {
+            const existingLink = await Link.findOne({
+                userId: req.userId
+            });
 
+            if (existingLink) {
+                res.json({
+                    hash: existingLink.hash
+                })
+                return;
+            }
+            const hash = random(10);
+            await Link.create({
+                userId: req.userId,
+                hash: hash
+            })
 
-app.listen(3000,()=>{
-  console.log("Server is Runinng");
-});
+            res.json({
+                hash
+            })
+    } else {
+        await Link.deleteOne({
+            userId: req.userId
+        });
+
+        res.json({
+            message: "Removed link"
+        })
+    }
+})
+
+app.get("/api/v1/brain/:shareLink", async (req, res) => {
+    const hash = req.params.shareLink;
+
+    const link = await Link.findOne({
+        hash
+    });
+
+    if (!link) {
+        res.status(411).json({
+            message: "Sorry incorrect input"
+        })
+        return;
+    }
+    // userId
+    const content = await Content.find({
+        userId: link.userId
+    })
+
+    console.log(link);
+    const user = await User.findOne({
+        _id: link.userId
+    })
+
+    if (!user) {
+        res.status(411).json({
+            message: "user not found, error should ideally not happen"
+        })
+        return;
+    }
+
+    res.json({
+        username: user.username,
+        content: content
+    })
+
+})
+
+app.listen(3000);
